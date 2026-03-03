@@ -89,4 +89,32 @@ $ ./TimestampEstimator.py -s 20 1000 10 7
 ```bash
 $ ./TimestampEstimator.py -e
 ```
-## Using Tweet ID Regex to 
+## Using Tweet ID Regex to Retrieve Tweet URLs at Different Levels of Granularity
+
+* Use Reverse TweetedAt to determine tweet ID regex across temporal granularity
+* Use the tweet ID regex to grep through a CDX API response of all tweets associated with a Twitter account
+
+**Example:**
+
+For a tweet ID '1495226962058649603,' using Reverse TweetedAt we can get the timestamp at millisecond-level granularity (2022-02-20T02:41:02.385Z). We can use this timestamp to get the tweet ID regex at millisecond-level granularity using Reverse TweetedAt.
+
+  **Finding search space at millisecond-level granularity:**
+```bash
+$ curl -s "https://web.archive.org/cdx/search/cdx?url=https://twitter.com/randyhillier/status/&matchType=prefix" \
+| grep -E 'status/14952269620[0-9]{8}' | wc -l
+```
+
+  We can further reduce the precision of the tweet ID prefix to second- and minute-level granularity and obtain the tweet ID regex to compute the corresponding search space. 
+  
+  **Finding search space at millisecond-level granularity:**
+  ```bash
+$ curl -s "https://web.archive.org/cdx/search/cdx?url=https://twitter.com/randyhillier/status/&matchType=prefix" \
+| grep -E 'status/149522696[0-9]{10}' | wc -l
+```
+
+  **Finding search space at millisecond-level granularity:**
+```bash
+curl -s "https://web.archive.org/cdx/search/cdx?url=https://twitter.com/randyhillier/status/&matchType=prefix" \
+| grep -E 'status/149522[0-9]{13}' | wc -l
+```
+This illustrates how lower temporal granularity expands the potential search space. However, a wider ID range does not necessarily produce more results; it only increases the number of possible candidate IDs.
