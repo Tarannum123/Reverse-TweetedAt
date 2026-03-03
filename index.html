@@ -2599,135 +2599,85 @@ function get_tweet_id_from_timestamp() {
   const TWITTER_EPOCH_MS = 1288834974657n; // 2010-11-04T01:42:54.657Z
   const LOWER_22_MASK = (1n << 22n) - 1n;
 
-function parseToDate(str) {
+function parseToDateAndGranularity(str) {
   if (!str) return null;
-  let s = str.trim();
+  const s = str.trim();
 
-  // 1) Wayback-like: YYYYMMDDhhmmss / YYYYMMDDhhmm / YYYYMMDD  (interpreted as UTC)
+  // ---------- ISO 8601 (UTC "Z") ----------
+  // ms: 2022-02-20T02:41:02.385Z
   let m;
-  if ((m = s.match(/^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})$/))) {
+  if ((m = s.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})\.(\d{3})Z$/))) {
+    const [_, Y, Mo, D, h, mi, se, ms] = m;
+    const t = Date.UTC(+Y, +Mo-1, +D, +h, +mi, +se, +ms);
+    return { date: new Date(t), gran: 'ms' };
+  }
+  // s: 2022-02-20T02:41:02Z
+  if ((m = s.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})Z$/))) {
     const [_, Y, Mo, D, h, mi, se] = m;
-    return new Date(Date.UTC(+Y, +Mo - 1, +D, +h, +mi, +se));
+    const t = Date.UTC(+Y, +Mo-1, +D, +h, +mi, +se, 0);
+    return { date: new Date(t), gran: 's' };
   }
-  if ((m = s.match(/^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})$/))) {
+  // min: 2022-02-20T02:41Z
+  if ((m = s.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})Z$/))) {
     const [_, Y, Mo, D, h, mi] = m;
-    return new Date(Date.UTC(+Y, +Mo - 1, +D, +h, +mi, 0));
+    const t = Date.UTC(+Y, +Mo-1, +D, +h, +mi, 0, 0);
+    return { date: new Date(t), gran: 'min' };
   }
-  if ((m = s.match(/^(\d{4})(\d{2})(\d{2})$/))) {
+  // hour: 2022-02-20T02Z
+  if ((m = s.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2})Z$/))) {
+    const [_, Y, Mo, D, h] = m;
+    const t = Date.UTC(+Y, +Mo-1, +D, +h, 0, 0, 0);
+    return { date: new Date(t), gran: 'h' };
+  }
+  // date: 2022-02-20Z
+  if ((m = s.match(/^(\d{4})-(\d{2})-(\d{2})Z$/))) {
     const [_, Y, Mo, D] = m;
-    return new Date(Date.UTC(+Y, +Mo - 1, +D, 0, 0, 0));
+    const t = Date.UTC(+Y, +Mo-1, +D, 0, 0, 0, 0);
+    return { date: new Date(t), gran: 'date' };
   }
 
-  // 2) Unix epoch (seconds or milliseconds)
-  if (/^\d{10}$/.test(s)) return new Date(Number(s) * 1000);
-  if (/^\d{13}$/.test(s)) return new Date(Number(s));
-
-  // 🚫 3) Reject *other* pure-digit inputs (like YYYYMM, YYYY, etc.)
-  //    If it's all digits but not 8/10/13/14 handled above, treat as invalid.
-  if (/^\d+$/.test(s)) {
-    // examples: 202511, 2025, 1234567, etc. → invalid
-    return null;
+  // ---------- RFC 1123 (UTC "GMT") ----------
+  // s: Sun, 20 Feb 2022 02:41:02 GMT
+  if ((m = s.match(/^[A-Za-z]{3},\s(\d{2})\s([A-Za-z]{3})\s(\d{4})\s(\d{2}):(\d{2}):(\d{2})\sGMT$/))) {
+    const day = +m[1], monStr = m[2], year = +m[3], hh = +m[4], mm = +m[5], ss = +m[6];
+    const mons = {Jan:0,Feb:1,Mar:2,Apr:3,May:4,Jun:5,Jul:6,Aug:7,Sep:8,Oct:9,Nov:10,Dec:11};
+    if (!(monStr in mons)) return null;
+    const t = Date.UTC(year, mons[monStr], day, hh, mm, ss, 0);
+    return { date: new Date(t), gran: 's' };
+  }
+  // min: Sun, 20 Feb 2022 02:41 GMT
+  if ((m = s.match(/^[A-Za-z]{3},\s(\d{2})\s([A-Za-z]{3})\s(\d{4})\s(\d{2}):(\d{2})\sGMT$/))) {
+    const day = +m[1], monStr = m[2], year = +m[3], hh = +m[4], mm = +m[5];
+    const mons = {Jan:0,Feb:1,Mar:2,Apr:3,May:4,Jun:5,Jul:6,Aug:7,Sep:8,Oct:9,Nov:10,Dec:11};
+    if (!(monStr in mons)) return null;
+    const t = Date.UTC(year, mons[monStr], day, hh, mm, 0, 0);
+    return { date: new Date(t), gran: 'min' };
   }
 
-  // 4) Normalize some common log/locale quirks
-  s = s.replace(/\s*\([^)]*\)\s*$/, ''); // drop trailing "(Eastern Standard Time)"
-  s = s.replace(/\//g, '-');             // convert slashes to hyphens
-
-  // 5) "YYYY-MM-DD HH:mm(:ss[.ms])" with no timezone
-  const noTZ = /^(\d{4}-\d{2}-\d{2})[ T](\d{2}):(\d{2})(?::(\d{2})(\.\d{1,3})?)?$/;
-  const n = s.match(noTZ);
-  if (n) {
-    const [ , datePart, H, M, S = "0", frac = "" ] = n;
-    const [Y, Mo, D] = datePart.split('-').map(Number);
-    const ms = frac ? Math.round(parseFloat(frac) * 1000) : 0;
-    return new Date(Date.UTC(Y, Mo - 1, D, +H, +M, +S, ms));
+  // ---------- IA Wayback numeric (UTC) ----------
+  // s: 20220220024102 (sec), 202202200241 (min), 2022022002 (hour), 20220220 (date)
+  if (/^\d{14}$/.test(s)) {
+    const Y=+s.slice(0,4), Mo=+s.slice(4,6), D=+s.slice(6,8), h=+s.slice(8,10), mi=+s.slice(10,12), se=+s.slice(12,14);
+    return { date: new Date(Date.UTC(Y,Mo-1,D,h,mi,se,0)), gran: 's' };
+  }
+  if (/^\d{12}$/.test(s)) {
+    const Y=+s.slice(0,4), Mo=+s.slice(4,6), D=+s.slice(6,8), h=+s.slice(8,10), mi=+s.slice(10,12);
+    return { date: new Date(Date.UTC(Y,Mo-1,D,h,mi,0,0)), gran: 'min' };
+  }
+  if (/^\d{10}$/.test(s)) {
+    const Y=+s.slice(0,4), Mo=+s.slice(4,6), D=+s.slice(6,8), h=+s.slice(8,10);
+    return { date: new Date(Date.UTC(Y,Mo-1,D,h,0,0,0)), gran: 'h' };
+  }
+  if (/^\d{8}$/.test(s)) {
+    const Y=+s.slice(0,4), Mo=+s.slice(4,6), D=+s.slice(6,8);
+    return { date: new Date(Date.UTC(Y,Mo-1,D,0,0,0,0)), gran: 'date' };
   }
 
-  // 6) Date-only "YYYY-MM-DD" with no timezone
-  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
-    const [Y, Mo, D] = s.split('-').map(Number);
-    return new Date(Date.UTC(Y, Mo - 1, D, 0, 0, 0));
-  }
-
-  // 7) Fallback: native parser (ISO 8601, RFC 1123/2822, explicit offsets)
-  const d = new Date(s);
-  return Number.isNaN(d.getTime()) ? null : d;
-}
-function parseToDate(str) {
-  if (!str) return null;
-  const raw = str.trim();
-  let s = raw;
-
-  // ❌ Reject trailing separators or dots: YYYY-, YYYY/, YYYY., YYYY-MM-, YYYY/MM/, YYYY.MM.
-  if (/^[0-9]{4}[-/.]$/.test(raw) ||
-      /^[0-9]{4}[-/.][0-9]{2}[-/.]$/.test(raw) ||
-      /^[0-9]{4}[-/.][0-9]{1,2}[-/.]?$/.test(raw)) {
-    return null;
-  }
-
-  // ❌ Reject partial dates: YYYY-MM, YYYY/MM, YYYY.MM (year-month only)
-  if (/^[0-9]{4}[-/.][0-9]{2}$/.test(raw)) {
-    return null;
-  }
-
-  // ❌ Reject weird year-month numeric variations like 2025.11 or 2025.11.
-  if (/^[0-9]{4}\.[0-9]{2}\.?$/.test(raw)) {
-    return null;
-  }
-
-  // 1) Wayback-like: YYYYMMDDhhmmss / YYYYMMDDhhmm / YYYYMMDD  (interpreted as UTC)
-  let m;
-  if ((m = s.match(/^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})$/))) {
-    const [_, Y, Mo, D, h, mi, se] = m;
-    return new Date(Date.UTC(+Y, +Mo - 1, +D, +h, +mi, +se));
-  }
-  if ((m = s.match(/^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})$/))) {
-    const [_, Y, Mo, D, h, mi] = m;
-    return new Date(Date.UTC(+Y, +Mo - 1, +D, +h, +mi, 0));
-  }
-  if ((m = s.match(/^(\d{4})(\d{2})(\d{2})$/))) {
-    const [_, Y, Mo, D] = m;
-    return new Date(Date.UTC(+Y, +Mo - 1, +D, 0, 0, 0));
-  }
-
-  // 2) Unix epoch (seconds or milliseconds)
-  if (/^\d{10}$/.test(s)) return new Date(Number(s) * 1000);
-  if (/^\d{13}$/.test(s)) return new Date(Number(s));
-
-  // ❌ Reject remaining pure digits (e.g. 202511, 2025, 1234567)
-  if (/^\d+$/.test(s)) {
-    return null;
-  }
-
-  // 3) Normalize common log/locale quirks
-  s = s.replace(/\s*\([^)]*\)\s*$/, ''); // drop trailing "(Eastern Standard Time)"
-  s = s.replace(/\//g, '-');             // convert slashes to hyphens
-
-  // 4) "YYYY-MM-DD HH:mm(:ss[.ms])" with no timezone (assume UTC)
-  const noTZ = /^(\d{4}-\d{2}-\d{2})[ T](\d{2}):(\d{2})(?::(\d{2})(\.\d{1,3})?)?$/;
-  const n = s.match(noTZ);
-  if (n) {
-    const [ , datePart, H, M, S = "0", frac = "" ] = n;
-    const [Y, Mo, D] = datePart.split('-').map(Number);
-    const ms = frac ? Math.round(parseFloat(frac) * 1000) : 0;
-    return new Date(Date.UTC(Y, Mo - 1, D, +H, +M, +S, ms));
-  }
-
-  // 5) Date-only "YYYY-MM-DD" (assume UTC)
-  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
-    const [Y, Mo, D] = s.split('-').map(Number);
-    return new Date(Date.UTC(Y, Mo - 1, D, 0, 0, 0));
-  }
-
-  // 6) Final fallback: ISO 8601, RFC 1123/2822, etc.
-  const d = new Date(s);
-  return Number.isNaN(d.getTime()) ? null : d;
+  // Anything else: reject (including "Sun, 20 Feb 2022 02 GMT" and padded zero-unknown forms)
+  return null;
 }
 
-
-
-
-  // helper: align labels (kept from your original)
+// helper: align labels (kept from your original)
   function padLabel(label, width) {
     if (label.length >= width) return label;
     return label + ' '.repeat(width - label.length);
@@ -2812,126 +2762,44 @@ function parseToDate(str) {
   }
 
   // helper: compute [startMs, endMs] and a label from the raw input pattern
-  function computeTimeRangeFromInput(raw, date) {
-    const s = raw.trim();
+    // Compute an inclusive millisecond range for the input's granularity.
+  function computeTimeRangeFromGran(date, gran) {
     const ms = date.getTime();
     let start = ms;
     let end = ms;
     let label = 'millisecond-level (exact timestamp)';
 
-    // Wayback forms (UTC)
-    if (/^\d{14}$/.test(s)) {
-      // YYYYMMDDhhmmss → second-level
-      label = 'second-level (YYYYMMDDhhmmss)';
+    if (gran === 'ms') {
+      label = 'millisecond-level (ISO 8601 with ms)';
       start = ms;
-      end = ms + 999;
-      return { startMs: start, endMs: end, label };
-    }
-    if (/^\d{12}$/.test(s)) {
-      // YYYYMMDDhhmm → minute-level
-      label = 'minute-level (YYYYMMDDhhmm)';
+      end = ms;
+    } else if (gran === 's') {
+      label = 'second-level (whole second)';
+      start = ms;
+      end = ms + 1000 - 1;
+    } else if (gran === 'min') {
+      label = 'minute-level (whole minute)';
       const d = new Date(ms);
       d.setUTCSeconds(0, 0);
       start = d.getTime();
       end = start + 60 * 1000 - 1;
-      return { startMs: start, endMs: end, label };
-    }
-    if (/^\d{8}$/.test(s)) {
-      // YYYYMMDD → date-level
-      label = 'date-level (YYYYMMDD)';
+    } else if (gran === 'h') {
+      label = 'hour-level (whole hour)';
+      const d = new Date(ms);
+      d.setUTCMinutes(0, 0, 0);
+      start = d.getTime();
+      end = start + 60 * 60 * 1000 - 1;
+    } else if (gran === 'date') {
+      label = 'date-level (whole day)';
       const d = new Date(ms);
       d.setUTCHours(0, 0, 0, 0);
       start = d.getTime();
-      end = start + 24 * 3600 * 1000 - 1;
-      return { startMs: start, endMs: end, label };
+      end = start + 24 * 60 * 60 * 1000 - 1;
     }
-
-    // Hyphenated no-TZ "YYYY-MM-DD[ HH[:mm[:ss[.ms]]]]"
-    const noTZ = /^(\d{4}-\d{2}-\d{2})(?:[ T](\d{2})(?::(\d{2})(?::(\d{2})(\.\d{1,3})?)?)?)?$/;
-    const m = s.match(noTZ);
-    if (m) {
-      const hasHour   = m[2] != null;
-      const hasMinute = m[3] != null;
-      const hasSecond = m[4] != null;
-      const hasFrac   = m[5] != null;
-      const d = new Date(ms);
-
-      if (!hasHour) {
-        label = 'date-level (YYYY-MM-DD)';
-        d.setUTCHours(0, 0, 0, 0);
-        start = d.getTime();
-        end = start + 24 * 3600 * 1000 - 1;
-      } else if (hasHour && !hasMinute) {
-        label = 'hour-level (YYYY-MM-DD HH)';
-        d.setUTCMinutes(0, 0, 0);
-        start = d.getTime();
-        end = start + 3600 * 1000 - 1;
-      } else if (hasHour && hasMinute && !hasSecond) {
-        label = 'minute-level (YYYY-MM-DD HH:mm)';
-        d.setUTCSeconds(0, 0);
-        start = d.getTime();
-        end = start + 60 * 1000 - 1;
-      } else if (hasSecond && !hasFrac) {
-        label = 'second-level (YYYY-MM-DD HH:mm:ss)';
-        d.setUTCMilliseconds(0);
-        start = d.getTime();
-        end = start + 1000 - 1;
-      } else {
-        label = 'millisecond-level (YYYY-MM-DD HH:mm:ss.sss)';
-        start = ms;
-        end = ms;
-      }
-      return { startMs: start, endMs: end, label };
-    }
-
-    // ISO 8601 / RFC-like: inspect time portion for granularity
-    // Try to find something like HH:mm[:ss[.ms]]
-    const timeMatch =
-      s.match(/T(\d{2}):(\d{2})(?::(\d{2})(\.\d+)?)?/) ||
-      s.match(/\b(\d{2}):(\d{2})(?::(\d{2})(\.\d+)?)?\b/);
-
-    if (timeMatch) {
-      const hasMinute = timeMatch[2] != null;
-      const hasSecond = timeMatch[3] != null;
-      const hasFrac   = timeMatch[4] != null;
-      const d = new Date(ms);
-
-      if (!hasMinute) {
-        label = 'hour-level (HH only)';
-        d.setMinutes(0, 0, 0);
-        start = d.getTime();
-        end = start + 3600 * 1000 - 1;
-      } else if (hasMinute && !hasSecond) {
-        label = 'minute-level (HH:mm)';
-        d.setSeconds(0, 0);
-        start = d.getTime();
-        end = start + 60 * 1000 - 1;
-      } else if (hasSecond && !hasFrac) {
-        label = 'second-level (HH:mm:ss)';
-        d.setMilliseconds(0);
-        start = d.getTime();
-        end = start + 1000 - 1;
-      } else {
-        label = 'millisecond-level (HH:mm:ss.sss)';
-        start = ms;
-        end = ms;
-      }
-      return { startMs: start, endMs: end, label };
-    }
-
-    // Pure date "YYYY-MM-DD"
-    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
-      label = 'date-level (YYYY-MM-DD)';
-      const d = new Date(ms);
-      d.setHours(0, 0, 0, 0);
-      start = d.getTime();
-      end = start + 24 * 3600 * 1000 - 1;
-      return { startMs: start, endMs: end, label };
-    }
-
-    // Fallback: treat as millisecond-level exact timestamp
-    return { startMs: ms, endMs: ms, label };
+    return { startMs: start, endMs: end, label };
   }
+
+
 
   // helper: compute decimal prefix and suffix range for an ID interval
   function computeIdPrefixRange(minId, maxId) {
@@ -2967,8 +2835,7 @@ function parseToDate(str) {
       '• <a href="https://www.rfc-editor.org/rfc/rfc1123" target="_blank">RFC 1123</a> (e.g., Tue, 11 Nov 2025 18:36:00 GMT)<br>' +
       '• Local with offset (e.g., Tue, 11 Nov 2025 13:36:00 GMT-0500 (Eastern Standard Time))<br>' +
       '• Slash forms (e.g., 2025/11/11 18:36:00)<br>' +
-      '• IA Wayback (UTC) (e.g., 20251111183600)<br>' +
-      'Note: Input zeros for hours/minutes/seconds/milliseconds if unknown.<br>';
+      '• IA Wayback (UTC) (e.g., 20251111183600)<br>';
 
     if (!isPopulatingFromHash) {
       history.pushState('', document.title, window.location.pathname);
@@ -2976,26 +2843,24 @@ function parseToDate(str) {
     return;
   }
 
-  const date = parseToDate(input);
-  if (!date) {
+  const parsed = parseToDateAndGranularity(input);
+  if (!parsed) {
     resultBox.innerHTML =
       'Input a valid time format. Try one of:<br>' +
       '• <a href="https://en.wikipedia.org/wiki/ISO_8601" target="_blank">ISO 8601</a> (e.g., 2025-11-11T18:36:00.678Z)<br>' +
       '• <a href="https://www.rfc-editor.org/rfc/rfc1123" target="_blank">RFC 1123</a> (e.g., Tue, 11 Nov 2025 18:36:00 GMT)<br>' +
       '• Local with offset (e.g., Tue, 11 Nov 2025 13:36:00 GMT-0500 (Eastern Standard Time))<br>' +
       '• Slash forms (e.g., 2025/11/11 18:36:00)<br>' +
-      '• IA Wayback (UTC) (e.g., 20251111183600)<br>' +
-      'Note: Input zeros for hours/minutes/seconds/milliseconds if unknown.<br>';
-
-    if (!isPopulatingFromHash) {
-      history.pushState('', document.title, window.location.pathname);
-    }
+      '• IA Wayback (UTC) (e.g., 20251111183600)<br>';
     return;
   }
+  const date = parsed.date;
+  const gran = parsed.gran;
+  
 
   // Determine time window based on granularity
   const { startMs, endMs, label: granularityLabel } =
-    computeTimeRangeFromInput(input, date);
+    computeTimeRangeFromGran(date, gran);
 
   let startBig = BigInt(startMs);
   let endBig   = BigInt(endMs);
@@ -3044,8 +2909,8 @@ function parseToDate(str) {
   padLabel('<b>Tweet ID prefix:       </b>', labelWidth) +
     `${expRange.prefixStr || '0'} (of ${expRange.totalDigits}-digit ID)`,
 
-  padLabel('<b>Tweet ID exponent:     </b>', labelWidth) +
-    `${expRange.prefixStr || '0'} × 10^${expRange.suffixLen}`,
+  padLabel('<b>Tweet ID regex:        </b>', labelWidth) +
+    `${expRange.prefixStr || '0'}[0-9]{${expRange.suffixLen}}`,
 
   padLabel('<b>Tweet ID range:        </b>', labelWidth) +
     `[${expRange.approxLower.toString()} – ${expRange.approxUpper.toString()}]`,
@@ -3087,13 +2952,12 @@ window.addEventListener('load', () => {
             }
             if (result2) {
                 result2.innerHTML =
-                    'Input a valid time format. Try one of:<br>' +
-                    '• <a href="https://en.wikipedia.org/wiki/ISO_8601" target="_blank">ISO 8601</a> (e.g., 2025-11-11T18:36:00.678Z)<br>' +
-                    '• <a href="https://www.rfc-editor.org/rfc/rfc1123" target="_blank">RFC 1123</a> (e.g., Tue, 11 Nov 2025 18:36:00 GMT)<br>' +
-                    '• Local with offset (e.g., Tue, 11 Nov 2025 13:36:00 GMT-0500 (Eastern Standard Time))<br>' +
-                    '• Slash forms (e.g., 2025/11/11 18:36:00)<br>' +
-                    '• IA Wayback (UTC) (e.g., 20251111183600)<br>' +
-                    'Note: Input zeros for hours/minutes/seconds/milliseconds if unknown.<br>';
+                          'Input a valid time format. Try one of:<br>' +
+                          '• <a href="https://en.wikipedia.org/wiki/ISO_8601" target="_blank">ISO 8601</a> (e.g., 2025-11-11T18:36:00.678Z)<br>' +
+                          '• <a href="https://www.rfc-editor.org/rfc/rfc1123" target="_blank">RFC 1123</a> (e.g., Tue, 11 Nov 2025 18:36:00 GMT)<br>' +
+                          '• Local with offset (e.g., Tue, 11 Nov 2025 13:36:00 GMT-0500 (Eastern Standard Time))<br>' +
+                          '• Slash forms (e.g., 2025/11/11 18:36:00)<br>' +
+                          '• IA Wayback (UTC) (e.g., 20251111183600)<br>';
             }
 });
 
