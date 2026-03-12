@@ -2,11 +2,11 @@
 
 [TweetedAt](https://oduwsdl.github.io/tweetedat/) extracts date and time from the tweet ID by reverse-engineering [Twitter Snowflake](https://blog.twitter.com/engineering/en_us/a/2010/announcing-snowflake.html). It is the only web service which allows users to find the timestamp of the Snowflake tweet IDs and estimate tweet timestamps for pre-Snowflake Tweet IDs.
 
-[ReverseTweetedAt](https://tarannum123.github.io/Reverse-TweetedAt/) converts timestamp to a tweet ID prefix by reversing [TweetedAt](https://oduwsdl.github.io/tweetedat/).
+[ReverseTweetedAt](https://oduwsdl.github.io/tweetedat/) converts timestamp to a tweet ID prefix by reversing [TweetedAt](https://oduwsdl.github.io/tweetedat/).
 
 [1] Mohammed Nauman Siddique and Sawood Alam. 2019. TweetedAt: Finding Tweet Timestamps for Pre and Post Snowflake Tweet IDs. (August 2019). Retrieved July 25, 2020 from https://ws-dl.blogspot.com/2019/08/2019-08-03-tweetedat-finding-tweet.html
 
-[2] Tarannum Zaki, Michael L. Nelson, and Michele C. Weigle. 2026. Reverse TweetedAt: Determining Tweet ID prefixes from Timestamps. (March 2026). Retrieved March 3, 2026 from https://www.blogger.com/blog/post/edit/preview/953024975153422094/8381283585583305826
+[2] Tarannum Zaki, Michael L. Nelson, and Michele C. Weigle. 2026. Reverse TweetedAt: Determining Tweet ID prefixes from Timestamps. (March 2026).
 
 ## Why not check on Twitter directly?
 
